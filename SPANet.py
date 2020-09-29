@@ -1,9 +1,45 @@
 import torch
 from torch import nn
 import torch.nn.functional as F
+import torch.nn.init as init
 from collections import OrderedDict
 # import common
 from irnn import irnn
+
+class DnCNN(nn.Module):
+    def __init__(self, depth=17, n_channels=64, image_channels=3, use_bnorm=True, kernel_size=3):
+        super(DnCNN, self).__init__()
+        kernel_size = 3
+        padding = 1
+        layers = []
+
+        layers.append(nn.Conv2d(in_channels=image_channels, out_channels=n_channels, kernel_size=kernel_size, padding=padding, bias=True))
+        layers.append(nn.ReLU(inplace=True))
+        for _ in range(depth-2):
+            layers.append(nn.Conv2d(in_channels=n_channels, out_channels=n_channels, kernel_size=kernel_size, padding=padding, bias=False))
+            layers.append(nn.BatchNorm2d(n_channels, eps=0.0001, momentum = 0.95))
+            layers.append(nn.ReLU(inplace=True))
+        layers.append(nn.Conv2d(in_channels=n_channels, out_channels=image_channels, kernel_size=kernel_size, padding=padding, bias=False))
+        self.dncnn = nn.Sequential(*layers)
+        self._initialize_weights()
+
+    def forward(self, x):
+        y = x
+        out = self.dncnn(x)
+        return y-out
+
+    def _initialize_weights(self):
+        print('init weight')
+        for m in self.modules():
+            if isinstance(m, nn.Conv2d):
+                init.orthogonal_(m.weight)
+                if m.bias is not None:
+                    init.constant_(m.bias, 0)
+            elif isinstance(m, nn.BatchNorm2d):
+                init.constant_(m.weight, 1)
+                init.constant_(m.bias, 0)
+                
+
 ###### Layer 
 def conv1x1(in_channels, out_channels, stride = 1):
     return nn.Conv2d(in_channels,out_channels,kernel_size = 1,
@@ -44,8 +80,6 @@ class Spacial_IRNN(nn.Module):
     def forward(self,input):
         return irnn()(input,self.up_weight.weight,self.right_weight.weight,self.down_weight.weight,self.left_weight.weight, self.up_weight.bias,self.right_weight.bias,self.down_weight.bias,self.left_weight.bias)
 
-
-
 class Attention(nn.Module):
     def __init__(self,in_channels):
         super(Attention,self).__init__()
@@ -65,7 +99,6 @@ class Attention(nn.Module):
         out = self.conv3(out)
         out = self.sigmod(out)
         return out
-
 
 class SAM(nn.Module):
     def __init__(self,in_channels,out_channels,attention=1):
@@ -175,4 +208,3 @@ class SPANet(nn.Module):
         out = self.conv_out(out)
 
         return Attention1 , out
-
