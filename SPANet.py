@@ -26,7 +26,7 @@ class DnCNN(nn.Module):
     def forward(self, x):
         y = x
         out = self.dncnn(x)
-        return y-out
+        return y-out, out
 
     def _initialize_weights(self):
         print('init weight')

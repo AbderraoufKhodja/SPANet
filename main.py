@@ -52,19 +52,19 @@ class Session:
         logger.info('set log dir as %s' % self.log_dir)
         logger.info('set model dir as %s' % self.model_dir)
 
-        self.test_data_path = 'D:/Training Datasets/Real_Rain_Streaks_Dataset_CVPR19/testing/real_test_1000.txt'  # test dataset txt file path
-        self.train_data_path = 'D:/Training Datasets/Real_Rain_Streaks_Dataset_CVPR19/training/real_world.pkl'  # train dataset txt file path
+        self.test_data_path = '/media/zjnu/Local Disk/Training Datasets/Real_Rain_Streaks_Dataset_CVPR19/testing/real_test_1000.txt'  # test dataset txt file path
+        self.train_data_path = '/media/zjnu/Local Disk/Training Datasets/Real_Rain_Streaks_Dataset_CVPR19/training/real_world.pkl'  # train dataset txt file path
 
         self.multi_gpu = True
-        self.net = DnCNN().to(self.device)
+        self.net = SPANet().to(self.device)
         self.l1 = nn.L1Loss().to(self.device)
         self.l2 = nn.MSELoss().to(self.device)
         self.ssim = SSIM().to(self.device)
 
         self.step = 0
         self.save_steps = 400
-        self.num_workers = 0
-        self.batch_size = 1
+        self.num_workers = 16
+        self.batch_size = 16   # Minibatch size accumuluted twice
         self.writers = {}
         self.dataloaders = {}
         self.shuffle = True
@@ -134,11 +134,11 @@ class Session:
             return out.cpu().data, batch['B'], O, mask
 
         # loss
-        l2_loss = self.l2(out, B)
+        l1_loss = self.l1(out, B)
         mask_loss = self.l2(mask[:, 0, :, :], M)
         ssim_loss = self.ssim(out, B)
 
-        loss = l2_loss# + (1 - ssim_loss) + mask_loss
+        loss = l1_loss + mask_loss# + (1 - ssim_loss)
 
         # log
         losses = {
@@ -180,10 +180,10 @@ class Session:
         data, label, pred, mask, mask_label = data * 255, label * 255, pred * 255, mask * 255, mask_label * 255
         pred = np.clip(pred, 0, 255)
 
-        mask = np.clip(mask.numpy(), 0, 255).astype('uint8')
+        mask = np.clip(mask, 0, 255)
         mask_label = np.clip(mask_label.numpy(), 0, 255).astype('uint8')
         h, w = pred.shape[-2:]
-        mask = self.heatmap(mask)
+        # mask = self.heatmap(mask)
         mask_label = self.heatmap(mask_label)
         gen_num = (1, 1)
 
@@ -214,32 +214,32 @@ def run_train_val(ckp_name='latest'):
     dt_train = sess.get_dataloader(sess.train_data_path)
     dt_val = sess.get_dataloader(sess.train_data_path)
 
-    while sess.step < 225001:
-        sess.sche.step()
+    while sess.step < 120001:
         sess.net.train()
-        sess.net.zero_grad()
-
         batch_t = next(dt_train)
         pred_t, mask_t, M_t, loss_t, losses_t = sess.inf_batch(sess.log_name, batch_t)
+        loss_t = loss_t / 2
         sess.write(sess.log_name, losses_t)
         loss_t.backward()
-        sess.opt.step()
-
-        if sess.step % 4 == 0:
-            sess.net.eval()
-            batch_v = next(dt_val)
-            pred_v, mask_v, M_v, loss_v, losses_v = sess.inf_batch(sess.val_log_name, batch_v)
-            sess.write(sess.val_log_name, losses_v)
-        if sess.step % int(sess.save_steps / 16) == 0:
-            sess.save_checkpoints('latest')
-        if sess.step % int(sess.save_steps / 2) == 0:
-            sess.save_mask(sess.log_name, [batch_t['O'], pred_t, batch_t['B'], mask_t, M_t])
-            if sess.step % 4 == 0:
-                sess.save_mask('valderain5', [batch_v['O'], pred_v, batch_v['B'], mask_v, M_v])
-            logger.info('save image as step_%d' % sess.step)
-        if sess.step % sess.save_steps == 0:
-            sess.save_checkpoints('step_%d' % sess.step)
-            logger.info('save model as step_%d' % sess.step)
+        if sess.step % 2 == 0:
+            sess.opt.step()
+            sess.net.zero_grad()
+            sess.sche.step()
+            # if sess.step % 4 == 0:
+            #     sess.net.eval()
+            #     batch_v = next(dt_val)
+            #     pred_v, mask_v, M_v, loss_v, losses_v = sess.inf_batch(sess.val_log_name, batch_v)
+            #     sess.write(sess.val_log_name, losses_v)
+            if sess.step % int(sess.save_steps / 16) == 0:
+                sess.save_checkpoints('latest')
+            if sess.step % int(sess.save_steps / 2) == 0:
+                sess.save_mask(sess.log_name, [batch_t['O'], pred_t, batch_t['B'], mask_t, M_t])
+                # if sess.step % 4 == 0:
+                #     sess.save_mask('valderain5', [batch_v['O'], pred_v, batch_v['B'], mask_v, M_v])
+                logger.info('save image as step_%d' % sess.step)
+            if sess.step % sess.save_steps == 0:
+                sess.save_checkpoints('step_%d' % sess.step)
+                logger.info('save model as step_%d' % sess.step)
         sess.step += 1
 
 

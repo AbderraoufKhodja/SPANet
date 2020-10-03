@@ -8,7 +8,7 @@ import PIL.Image as Image
 import pickle
 import random
 
-train_root = 'D:/Training Datasets/Real_Rain_Streaks_Dataset_CVPR19/training'
+train_root = '/media/zjnu/Local Disk/Training Datasets/Real_Rain_Streaks_Dataset_CVPR19/training'
 
 class TrainValDataset(Dataset):
     def __init__(self, name):
@@ -32,13 +32,15 @@ class TrainValDataset(Dataset):
         img_file = file_name[list(file_name)[0]][random.randint(0, size_samples - 1)]
 
         O = cv2.imread(train_root + img_file)
+        # O = cv2.cvtColor(O, cv2.COLOR_BGR2GRAY)
         B = cv2.imread(train_root + gt_file)
+        # B = cv2.cvtColor(B, cv2.COLOR_BGR2GRAY)
 
         O = Image.fromarray(O)
         B = Image.fromarray(B)
 
         O, B = self.rc(O,B)
-        O, B = np.array(O),np.array(B)
+        O, B = np.array(O), np.array(B)
 
         M = np.clip((O-B).sum(axis=2),0,1).astype(np.float32)
         O = np.transpose(O.astype(np.float32) / 255, (2, 0, 1))
