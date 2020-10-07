@@ -29,8 +29,8 @@ ch.setLevel(logging.INFO)
 formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
 ch.setFormatter(formatter)
 logger.addHandler(ch)
-torch.cuda.manual_seed_all(2019)
-torch.manual_seed(2019)
+# torch.cuda.manual_seed_all(2019)
+# torch.manual_seed(2019)
 
 
 def ensure_dir(dir_path):
@@ -44,6 +44,7 @@ class Session:
         print(torch.cuda.device_count)
         print(self.device)
         self.log_dir = './logdir'
+        self.test_dir = './real_test'
         self.model_dir = './model'
         ensure_dir(self.log_dir)
         ensure_dir(self.model_dir)
@@ -52,7 +53,7 @@ class Session:
         logger.info('set log dir as %s' % self.log_dir)
         logger.info('set model dir as %s' % self.model_dir)
 
-        self.test_data_path = '/media/zjnu/Local Disk/Training Datasets/Real_Rain_Streaks_Dataset_CVPR19/testing/real_test_1000.txt'  # test dataset txt file path
+        self.test_data_path = '/media/zjnu/Local Disk/Training Datasets/Real_Rain_Streaks_Dataset_CVPR19/testing/Real_Internet.txt'  # test dataset txt file path
         self.train_data_path = '/media/zjnu/Local Disk/Training Datasets/Real_Rain_Streaks_Dataset_CVPR19/training/real_world.pkl'  # train dataset txt file path
 
         self.multi_gpu = True
@@ -94,7 +95,7 @@ class Session:
         }[train_mode](dataset_name)
         self.dataloaders[dataset_name] = \
             DataLoader(dataset, batch_size = self.batch_size,
-                       shuffle = self.shuffle, num_workers = self.num_workers, drop_last=True)
+                       shuffle = self.shuffle, num_workers = self.num_workers, drop_last = True)
         if train_mode:
             return iter(self.dataloaders[dataset_name])
         else:
@@ -171,7 +172,7 @@ class Session:
                 heat[i, :, :, :] = np.transpose(cv2.applyColorMap(img[i, 0, :, :], cv2.COLORMAP_JET), (2, 0, 1))
         return heat
 
-    def save_mask(self, name, img_lists, m=0):
+    def save_mask(self, name, img_lists, m=0, test = False):
         data, pred, label, mask, mask_label = img_lists
         pred = pred.cpu().data
 
@@ -183,7 +184,7 @@ class Session:
         mask = np.clip(mask, 0, 255)
         mask_label = np.clip(mask_label.numpy(), 0, 255).astype('uint8')
         h, w = pred.shape[-2:]
-        # mask = self.heatmap(mask)
+        mask = self.heatmap(mask.numpy())
         mask_label = self.heatmap(mask_label)
         gen_num = (1, 1)
 
@@ -199,7 +200,7 @@ class Session:
                         tmp = np.transpose(tmp_list[k], (1, 2, 0))
                         img[row: row + h, col: col + w] = tmp
 
-        img_file = os.path.join(self.log_dir, '%d_%s.png' % (self.step, name))
+        img_file = os.path.join(self.test_dir if test else self.log_dir, '%d_%s.png' % (self.step, name))
         cv2.imwrite(img_file, img)
 
 
@@ -215,7 +216,10 @@ def run_train_val(ckp_name='latest'):
     dt_val = sess.get_dataloader(sess.train_data_path)
 
     while sess.step < 120001:
+        torch.cuda.manual_seed_all(sess.step)
+        torch.manual_seed(sess.step)
         sess.net.train()
+        sess.action = 'train'
         batch_t = next(dt_train)
         pred_t, mask_t, M_t, loss_t, losses_t = sess.inf_batch(sess.log_name, batch_t)
         loss_t = loss_t / 2
@@ -260,11 +264,17 @@ def run_test(ckp_name):
     widgets = [progressbar.Percentage(), progressbar.Bar(), progressbar.ETA()]
     bar = progressbar.ProgressBar(widgets=widgets, maxval=len(dt)).start()
     for i, batch in enumerate(dt):
-        pred, B, losses, mask = sess.inf_batch('test', batch)
-        pred, B = pred[0], B[0]
+        pred, B, O, mask = sess.inf_batch('test', batch)
+        sess.save_mask(sess.log_name, [batch['O'], batch['B'], pred, mask, pred - batch['O']], test = True)
+        pred, B, O = pred[0], B[0], O[0]
+        pred = pred.cpu().data
         mask = mask.cpu().data
+        O = O.cpu().data
         mask = mask * 255
+        O = O * 255
         mask = np.clip(mask.numpy(), 0, 255).astype('uint8')
+        O = np.transpose(O.numpy(), (1, 2, 0))
+        O = O.astype('uint8')
         mask = sess.heatmap(mask)
         mask = np.transpose(mask[0], (1, 2, 0))
         pred = np.transpose(pred.numpy(), (1, 2, 0))
@@ -274,9 +284,10 @@ def run_test(ckp_name):
         ssim.append(ms.compare_ssim(pred, B, multichannel=True))
         psnr.append(ms.compare_psnr(pred, B))
         pred = pred * 255
-        ensure_dir('../realtest/derain5_real/')
-        cv2.imwrite('../realtest/derain5_real/{}.png'.format(i + 1), pred)
-        cv2.imwrite('../realtest/derain5_real/{}m.jpg'.format(i + 1), mask)
+        ensure_dir('./realtest/derain5_real/')
+        # cv2.imwrite('./realtest/derain5_real/my{}.png'.format(i + 1), pred)
+        # cv2.imwrite('./realtest/derain5_real/{}m.jpg'.format(i + 1), mask)
+        # cv2.imwrite('./realtest/derain5_real/{}o.jpg'.format(i + 1), O)
         bar.update(i + 1)
     print(np.mean(ssim), np.mean(psnr))
 
@@ -285,7 +296,7 @@ def run_test(ckp_name):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('-a', '--action', default='train')
+    parser.add_argument('-a', '--action', default='test')
     parser.add_argument('-m', '--model', default='latest')
 
     args = parser.parse_args(sys.argv[1:])
