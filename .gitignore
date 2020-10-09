@@ -2,3 +2,4 @@ logdir
 model
 realtest
 realtest_0
+__pycache__

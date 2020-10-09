@@ -11,7 +11,7 @@ from torch.nn import MSELoss
 from torch.optim import Adam
 import torch.nn.functional as F
 from torch.optim.lr_scheduler import MultiStepLR
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, SubsetRandomSampler
 
 from tensorboardX import SummaryWriter
 import skimage.measure as ms
@@ -29,8 +29,8 @@ ch.setLevel(logging.INFO)
 formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
 ch.setFormatter(formatter)
 logger.addHandler(ch)
-# torch.cuda.manual_seed_all(2019)
-# torch.manual_seed(2019)
+torch.cuda.manual_seed_all(2020)
+torch.manual_seed(2020)
 
 
 def ensure_dir(dir_path):
@@ -44,7 +44,7 @@ class Session:
         print(torch.cuda.device_count)
         print(self.device)
         self.log_dir = './logdir'
-        self.test_dir = './real_test'
+        self.test_dir = './realtest'
         self.model_dir = './model'
         ensure_dir(self.log_dir)
         ensure_dir(self.model_dir)
@@ -97,7 +97,7 @@ class Session:
             DataLoader(dataset, batch_size = self.batch_size,
                        shuffle = self.shuffle, num_workers = self.num_workers, drop_last = True)
         if train_mode:
-            return iter(self.dataloaders[dataset_name])
+            return self.dataloaders[dataset_name]
         else:
             return self.dataloaders[dataset_name]
 
@@ -172,7 +172,7 @@ class Session:
                 heat[i, :, :, :] = np.transpose(cv2.applyColorMap(img[i, 0, :, :], cv2.COLORMAP_JET), (2, 0, 1))
         return heat
 
-    def save_mask(self, name, img_lists, m=0, test = False):
+    def save_mask(self, name, img_lists, index = 0):
         data, pred, label, mask, mask_label = img_lists
         pred = pred.cpu().data
 
@@ -181,10 +181,10 @@ class Session:
         data, label, pred, mask, mask_label = data * 255, label * 255, pred * 255, mask * 255, mask_label * 255
         pred = np.clip(pred, 0, 255)
 
-        mask = np.clip(mask, 0, 255)
+        mask = np.clip(mask.numpy(), 0, 255).astype('uint8')
         mask_label = np.clip(mask_label.numpy(), 0, 255).astype('uint8')
         h, w = pred.shape[-2:]
-        mask = self.heatmap(mask.numpy())
+        mask = self.heatmap(mask)
         mask_label = self.heatmap(mask_label)
         gen_num = (1, 1)
 
@@ -200,7 +200,7 @@ class Session:
                         tmp = np.transpose(tmp_list[k], (1, 2, 0))
                         img[row: row + h, col: col + w] = tmp
 
-        img_file = os.path.join(self.test_dir if test else self.log_dir, '%d_%s.png' % (self.step, name))
+        img_file = os.path.join(self.log_dir, '%d_%s.png' % (self.step, name))
         cv2.imwrite(img_file, img)
 
 
@@ -211,40 +211,45 @@ def run_train_val(ckp_name='latest'):
         sess.net = nn.DataParallel(sess.net)
     sess.tensorboard(sess.log_name)
     sess.tensorboard(sess.val_log_name)
-
     dt_train = sess.get_dataloader(sess.train_data_path)
+    dt_train = enumerate(dt_train, start = sess.step)
     dt_val = sess.get_dataloader(sess.train_data_path)
+    dt_val = enumerate(dt_val, start = sess.step)
 
-    while sess.step < 120001:
-        torch.cuda.manual_seed_all(sess.step)
-        torch.manual_seed(sess.step)
-        sess.net.train()
-        sess.action = 'train'
-        batch_t = next(dt_train)
-        pred_t, mask_t, M_t, loss_t, losses_t = sess.inf_batch(sess.log_name, batch_t)
-        loss_t = loss_t / 2
-        sess.write(sess.log_name, losses_t)
-        loss_t.backward()
-        if sess.step % 2 == 0:
-            sess.opt.step()
-            sess.net.zero_grad()
-            sess.sche.step()
-            # if sess.step % 4 == 0:
-            #     sess.net.eval()
-            #     batch_v = next(dt_val)
-            #     pred_v, mask_v, M_v, loss_v, losses_v = sess.inf_batch(sess.val_log_name, batch_v)
-            #     sess.write(sess.val_log_name, losses_v)
-            if sess.step % int(sess.save_steps / 16) == 0:
-                sess.save_checkpoints('latest')
-            if sess.step % int(sess.save_steps / 2) == 0:
-                sess.save_mask(sess.log_name, [batch_t['O'], pred_t, batch_t['B'], mask_t, M_t])
+    while sess.step < 220001:
+        try:
+            sess.net.train()
+            batch_t = next(dt_train)[1]
+            pred_t, mask_t, M_t, loss_t, losses_t = sess.inf_batch(sess.log_name, batch_t)
+            loss_t = loss_t / 2
+            sess.write(sess.log_name, losses_t)
+            loss_t.backward()
+            if sess.step % 2 == 0:
+                sess.opt.step()
+                sess.net.zero_grad()
+                sess.sche.step()
                 # if sess.step % 4 == 0:
-                #     sess.save_mask('valderain5', [batch_v['O'], pred_v, batch_v['B'], mask_v, M_v])
-                logger.info('save image as step_%d' % sess.step)
-            if sess.step % sess.save_steps == 0:
-                sess.save_checkpoints('step_%d' % sess.step)
-                logger.info('save model as step_%d' % sess.step)
-        sess.step += 1
+                #     sess.net.eval()
+                #     batch_v = next(dt_val)
+                #     pred_v, mask_v, M_v, loss_v, losses_v = sess.inf_batch(sess.val_log_name, batch_v)
+                #     sess.write(sess.val_log_name, losses_v)
+                if sess.step % int(sess.save_steps / 16) == 0:
+                    sess.save_checkpoints('latest')
+                if sess.step % int(sess.save_steps / 16) == 0:
+                    sess.save_mask(sess.log_name, [batch_t['O'], pred_t, batch_t['B'], mask_t, M_t])
+                    # if sess.step % 4 == 0:
+                    #     sess.save_mask('valderain5', [batch_v['O'], pred_v, batch_v['B'], mask_v, M_v])
+                    logger.info('save image as step_%d' % sess.step)
+                if sess.step % int(sess.save_steps / 16) == 0:
+                    sess.save_checkpoints('step_%d' % sess.step)
+                    logger.info('save model as step_%d' % sess.step)
+            sess.step += 1
+        except:
+            torch.manual_seed(2021)
+            torch.cuda.manual_seed_all(2021)
+            dt_train = sess.get_dataloader(sess.train_data_path)
+            dt_train = enumerate(dt_train, start = 0)
+            continue
 
 
 def run_test(ckp_name):
@@ -265,7 +270,6 @@ def run_test(ckp_name):
     bar = progressbar.ProgressBar(widgets=widgets, maxval=len(dt)).start()
     for i, batch in enumerate(dt):
         pred, B, O, mask = sess.inf_batch('test', batch)
-        sess.save_mask(sess.log_name, [batch['O'], batch['B'], pred, mask, pred - batch['O']], test = True)
         pred, B, O = pred[0], B[0], O[0]
         pred = pred.cpu().data
         mask = mask.cpu().data
@@ -285,7 +289,7 @@ def run_test(ckp_name):
         psnr.append(ms.compare_psnr(pred, B))
         pred = pred * 255
         ensure_dir('./realtest/derain5_real/')
-        # cv2.imwrite('./realtest/derain5_real/my{}.png'.format(i + 1), pred)
+        cv2.imwrite('./realtest/derain5_real/step_92850_img_{}.png'.format(i + 1), np.concatenate([pred,O],axis = 1))
         # cv2.imwrite('./realtest/derain5_real/{}m.jpg'.format(i + 1), mask)
         # cv2.imwrite('./realtest/derain5_real/{}o.jpg'.format(i + 1), O)
         bar.update(i + 1)
@@ -296,7 +300,7 @@ def run_test(ckp_name):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('-a', '--action', default='test')
+    parser.add_argument('-a', '--action', default='train')
     parser.add_argument('-m', '--model', default='latest')
 
     args = parser.parse_args(sys.argv[1:])

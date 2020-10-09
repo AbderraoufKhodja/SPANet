@@ -10,6 +10,8 @@ from skimage import io
 import pickle
 import random
 
+random.seed(2020)
+
 train_root = '/media/zjnu/Local Disk/Training Datasets/Real_Rain_Streaks_Dataset_CVPR19/training'
 test_root = '/media/zjnu/Local Disk/Training Datasets/Real_Rain_Streaks_Dataset_CVPR19/testing'
 
@@ -41,7 +43,8 @@ class TrainValDataset(Dataset):
                 gt_file = file_name[list(file_name)[0]][rand_1]
                 img_file = file_name[list(file_name)[0]][rand_2]
 
-                Image.open(train_root + img_file).verify()
+                # Image.open(train_root + img_file).verify()
+                # io.imread(train_root + img_file)  
 
                 O = cv2.imread(train_root + img_file)
                 B = cv2.imread(train_root + gt_file)
@@ -100,28 +103,30 @@ class TestDataset(Dataset):
     #         return False
     #     return True
 
-if __name__ == "__main__":
-    rainy_dir = {}
-    text_dir = '/media/zjnu/Local Disk/Training Datasets/Real_Rain_Streaks_Dataset_CVPR19/training/real_world_orig.txt'
-    dor_root = '/media/zjnu/Local Disk/Training Datasets/Real_Rain_Streaks_Dataset_CVPR19/training'
-    mat_files = open(text_dir,'r').readlines()
-    progress = 0
-    for file in mat_files:
-        gt_file = file.split(' ')[1][:-1]
-        img_file = file.split(' ')[0]
-        if os.path.isfile(dor_root + img_file):
-            try:
-                Image.open(dor_root + img_file).verify()            
-                # if gt_file in rainy_dir:
-                #     rainy_dir[gt_file].append(img_file)
-                # else:
-                #     rainy_dir[gt_file] = [img_file]
-            except:
-                os.remove(dor_root + img_file) 
-                print('detect error img %s' % dor_root + img_file)
-                continue
-        progress += 1
-        if progress % 1000 == 0:
-            print(progress * 100 / len(mat_files))
-    # with open('/media/zjnu/Local Disk/Training Datasets/Real_Rain_Streaks_Dataset_CVPR19/training/real_world.pkl', 'wb') as f:
-    #     pickle.dump(rainy_dir, f)
+# if __name__ == "__main__":
+#     rainy_dir = {}
+#     text_dir = '/media/zjnu/Local Disk/Training Datasets/Real_Rain_Streaks_Dataset_CVPR19/training/real_world_orig.txt'
+#     dir_root = '/media/zjnu/Local Disk/Training Datasets/Real_Rain_Streaks_Dataset_CVPR19/training'
+#     mat_files = open(text_dir,'r').readlines()
+#     progress = 0
+#     for file in mat_files:
+#         gt_file = file.split(' ')[1][:-1]
+#         img_file = file.split(' ')[0]
+#         if os.path.isfile(dir_root + img_file):
+#             try:
+#                 Image.open(dir_root + img_file).verify()
+#                 cv2.imread(train_root + img_file)
+#                 io.imread(train_root + img_file)            
+#                 if gt_file in rainy_dir:
+#                     rainy_dir[gt_file].append(img_file)
+#                 else:
+#                     rainy_dir[gt_file] = [img_file]
+#             except:
+#                 # os.remove(dir_root + img_file) 
+#                 print('detect error img %s' % dir_root + img_file)
+#                 continue
+#         progress += 1
+#         if progress % 1000 == 0:
+#             print(progress * 100 / len(mat_files))
+#     with open('/media/zjnu/Local Disk/Training Datasets/Real_Rain_Streaks_Dataset_CVPR19/training/real_world.pkl', 'wb') as f:
+#         pickle.dump(rainy_dir, f)
